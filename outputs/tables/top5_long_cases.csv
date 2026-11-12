@@ -1,0 +1,6 @@
+﻿case:concept:name,days,n_events,n_crp,n_admission,icu,release,return_er
+NGA,114.36,184,69,5,True,Release C,False
+KM,52.41,169,51,4,True,Release A,True
+LJ,48.55,31,12,5,False,Release D,False
+NEA,39.1,51,18,2,True,Release A,False
+PU,35.92,38,15,2,False,Release B,False

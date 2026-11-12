@@ -1,0 +1,4 @@
+﻿variant,cases,median_days,mean_days,share_%,cum_%
+ER Registration → ER Triage → ER Sepsis Triage → Leucocytes → CRP → Admission NC → Release A,6,2.93,3.01,0.81,0.81
+ER Registration → ER Triage → ER Sepsis Triage → Leucocytes → LacticAcid → CRP → IV Liquid → IV Antibiotics → Admission NC → CRP → Leucocytes → Release A,5,3.23,3.14,0.68,2.3
+ER Registration → ER Triage → ER Sepsis Triage → Leucocytes → CRP → LacticAcid → IV Liquid → IV Antibiotics → Admission NC → Leucocytes → CRP → Release A,6,3.69,3.89,0.81,1.62
