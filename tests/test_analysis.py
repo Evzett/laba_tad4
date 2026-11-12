@@ -1,191 +1,184 @@
-import gzip
-import tempfile
+# -*- coding: utf-8 -*-
+"""Проверка analysis.py: запуск, инварианты summary.json, таблицы, рисунки,
+воспроизводимость результата.
+
+Запуск:  python -m unittest discover -s tests -v
+(analysis.py перезаписывает каталог outputs/)
+"""
+import csv
+import json
+import os
+import subprocess
+import sys
 import unittest
 from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import analysis
 
-class LoaderTests(unittest.TestCase):
-    def test_sort_utc_ties_duplicates_and_missing_attributes(self):
-        loader = getattr(analysis, 'load_log', None)
-        self.assertTrue(callable(loader), 'load_log not implemented')
-        xml = '''<log><trace><string key="concept:name" value="C"/>
-          <event><string key="concept:name" value="late"/><date key="time:timestamp" value="2020-01-01T02:00:00+01:00"/></event>
-          <event><string key="concept:name" value="first"/><date key="time:timestamp" value="2020-01-01T00:00:00Z"/></event>
-          <event><string key="concept:name" value="second"/><date key="time:timestamp" value="2019-12-31T19:00:00-05:00"/></event>
-          <event><string key="concept:name" value="second"/><date key="time:timestamp" value="2019-12-31T19:00:00-05:00"/></event>
-          <event><date key="time:timestamp" value="2020-01-01T00:00:00Z"/></event>
-          <event><string key="concept:name" value="bad"/></event>
-          <event><string key="concept:name" value="naive"/><date key="time:timestamp" value="2020-01-01T00:00:00"/></event>
-        </trace><trace><event><string key="concept:name" value="x"/><date key="time:timestamp" value="2020-01-01T00:00:00Z"/></event></trace></log>'''
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d)/'sample.xes.gz'
-            with gzip.open(path,'wt',encoding='utf-8') as f: f.write(xml)
-            cases, quality = loader(path)
-        self.assertEqual(list(cases), ['C'])
-        self.assertEqual([e['activity'] for e in cases['C']], ['first','second','second','late'])
-        self.assertEqual(cases['C'][0]['timestamp'].isoformat(), '2020-01-01T00:00:00+00:00')
-        self.assertEqual(quality['events_total'], 8)
-        self.assertEqual(quality['events_retained'], 4)
-        self.assertEqual(quality['events_missing_activity'], 1)
-        self.assertEqual(quality['events_invalid_timestamp'], 2)
-        self.assertEqual(quality['events_missing_case_id'], 1)
-        self.assertEqual(quality['adjacent_equal_timestamp_pairs'], 2)
-        self.assertEqual(quality['cases_reordered'], 1)
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "outputs"
+TAB = OUT / "tables"
+FIG = OUT / "figures"
 
-    def test_duplicate_case_ids_raise_even_when_first_case_has_no_valid_events(self):
-        xml = '<log><trace><string key="concept:name" value="C"/></trace><trace><string key="concept:name" value="C"/></trace></log>'
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d)/'s.gz'
-            with gzip.open(path,'wt',encoding='utf-8') as f: f.write(xml)
-            with self.assertRaises(ValueError): analysis.load_log(path)
-
-class CycleTests(unittest.TestCase):
-    def test_graph_two_node_cycles_do_not_imply_observed_fragment(self):
-        from datetime import datetime, timezone, timedelta
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        def case(names):
-            return [{'activity': name, 'timestamp': t + timedelta(hours=i)}
-                    for i, name in enumerate(names)]
-        # The reciprocal edges occur in different cases; the self-loop is excluded.
-        result = analysis.analyze({'1': case(['A', 'B']), '2': case(['B', 'A']),
-                                   '3': case(['A', 'A'])})
-        self.assertEqual(result['graph_two_node_cycles'], [
-            {'activity_a': 'A', 'activity_b': 'B', 'a_to_b_count': 1,
-             'b_to_a_count': 1}])
-        self.assertEqual(result['summary']['graph_two_node_cycle_count'], 1)
-    def test_observed_aba_counts_overlaps_cases_and_equal_timestamps(self):
-        from datetime import datetime, timezone, timedelta
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        def case(names, hours):
-            return [{'activity': name, 'timestamp': t + timedelta(hours=h)}
-                    for name, h in zip(names, hours)]
-        result = analysis.analyze({
-            '1': case(['A', 'B', 'A', 'B', 'A'], [0, 1, 2, 3, 4]),
-            '2': case(['A', 'B', 'A'], [0, 0, 1]),
-            '3': case(['B', 'A'], [0, 1]),
-            '4': case(['A', 'A', 'A'], [0, 1, 2]),
-        })
-        self.assertEqual(result['observed_aba'], [
-            {'start': 'A', 'middle': 'B', 'occurrences': 3, 'case_count': 2,
-             'occurrences_with_equal_timestamp': 1, 'case_count_with_equal_timestamp': 1},
-            {'start': 'B', 'middle': 'A', 'occurrences': 1, 'case_count': 1,
-             'occurrences_with_equal_timestamp': 0, 'case_count_with_equal_timestamp': 0},
-        ])
-        self.assertEqual(result['summary']['observed_aba_occurrences'], 4)
-        self.assertEqual(result['summary']['cases_with_observed_aba'], 2)
-        self.assertEqual(result['summary']['observed_aba_occurrences_with_equal_timestamp'], 1)
-    def test_cycle_csv_export_with_observed_and_graph_only_cycles(self):
-        import csv
-        import json
-        def trace(case_id, names):
-            events = ''.join(f'<event><string key="concept:name" value="{name}"/>'
-                             f'<date key="time:timestamp" value="2020-01-01T0{i}:00:00Z"/></event>'
-                             for i, name in enumerate(names))
-            return f'<trace><string key="concept:name" value="{case_id}"/>{events}</trace>'
-        xml = '<log>' + trace('1', ['A', 'B', 'A']) + trace('2', ['C', 'D']) + trace('3', ['D', 'C']) + '</log>'
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / 'sample.gz'
-            with gzip.open(path, 'wt', encoding='utf-8') as f:
-                f.write(xml)
-            output = Path(d) / 'out'
-            analysis.run(path, output, edge_threshold=1)
-            with (output / 'graph_two_node_cycles.csv').open(encoding='utf-8-sig', newline='') as f:
-                graph = list(csv.DictReader(f))
-            with (output / 'observed_aba.csv').open(encoding='utf-8-sig', newline='') as f:
-                observed = list(csv.DictReader(f))
-            self.assertEqual([(r['activity_a'], r['activity_b']) for r in graph], [('A', 'B'), ('C', 'D')])
-            self.assertEqual([(r['start'], r['middle'], r['occurrences'], r['case_count']) for r in observed], [('A', 'B', '1', '1')])
-            summary = json.loads((output / 'summary.json').read_text(encoding='utf-8'))
-            self.assertEqual(summary['graph_two_node_cycle_count'], 2)
-            self.assertEqual(summary['observed_aba_occurrences'], 1)
-    def test_cli_reports_cycle_totals(self):
-        import subprocess
-        xml = '<log><trace><string key="concept:name" value="1"/>' + ''.join(
-            f'<event><string key="concept:name" value="{name}"/>'
-            f'<date key="time:timestamp" value="2020-01-01T0{i}:00:00Z"/></event>'
-            for i, name in enumerate(['A', 'B', 'A'])) + '</trace></log>'
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / 's.gz'
-            with gzip.open(path, 'wt', encoding='utf-8') as f:
-                f.write(xml)
-            proc = subprocess.run([sys.executable, str(Path(analysis.__file__)), '--input', str(path),
-                                   '--output', str(Path(d) / 'out'), '--edge-threshold', '1'],
-                                  capture_output=True, text=True, check=True)
-            self.assertIn('graph two-node cycles: 1', proc.stdout)
-            self.assertIn('observed ABA occurrences: 1', proc.stdout)
-            self.assertIn('cases with ABA: 1', proc.stdout)
+CHARTS = ["duration_distribution.png", "variants_top10.png", "rework.png",
+          "antibiotics_delay.png", "labs_vs_duration.png"]
+GRAPHS = ["dfg_frequency", "dfg_performance", "petri_net", "bpmn"]
+TABLES = ["bottlenecks_by_median.csv", "bottlenecks_by_total.csv", "deviations.csv",
+          "dfg_edges_all.csv", "fastest_variants.csv", "lab_groups.csv",
+          "long_vs_normal.csv", "long_where_time.csv", "rework.csv",
+          "routes_fastest.csv", "routes_top10.csv", "self_loops.csv",
+          "top5_long_cases.csv", "two_node_cycles.csv", "variants_top10_all.csv",
+          "variants_top10_stay.csv"]
 
 
-class AnalysisTests(unittest.TestCase):
-    def test_post_sort_counts_cycles_longest_gap_and_end_specific_variants(self):
-        analyze = getattr(analysis, 'analyze', None)
-        self.assertTrue(callable(analyze), 'analyze not implemented')
-        from datetime import datetime, timezone, timedelta
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        def case(names, hours):
-            return [{'activity': n, 'timestamp': t + timedelta(hours=h)} for n,h in zip(names,hours)]
-        cases = {str(i): case(['A','B','A','Z'], [0,1,2,4]) for i in range(5)}
-        cases.update({str(i): case(['A','B','B','Z'], [0,2,3,10]) for i in range(5,10)})
-        cases.update({str(i): case(['A','Q'], [0,1]) for i in range(10,15)})
-        result = analyze(cases)
-        self.assertEqual(result['summary']['events'], 50)
-        self.assertEqual(result['summary']['cases'], 15)
-        edge = next(x for x in result['transitions'] if (x['source'],x['target']) == ('B','B'))
-        self.assertEqual(edge['count'], 5)
-        self.assertEqual(edge['median_hours'], 1)
-        self.assertEqual(result['summary']['cases_with_repeated_activity'], 10)
-        self.assertEqual(result['summary']['self_transitions'], 5)
-        selected = {v['end_activity']:v for v in result['best_variants']}
-        self.assertEqual(selected['Z']['median_hours'], 4)
-        self.assertEqual(selected['Q']['median_hours'], 1)
-        row = next(x for x in result['cases'] if x['case_id'] == '5')
-        self.assertEqual(row['max_gap_hours'], 7)
-        self.assertEqual((row['max_gap_source'],row['max_gap_target']), ('B','Z'))
-        self.assertEqual(result['summary']['duration_median_hours'], 4)
+def run_analysis():
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    return subprocess.run([sys.executable, str(ROOT / "analysis.py")], cwd=ROOT, env=env,
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=600)
 
-    def test_single_event_log_exports_empty_transitions(self):
-        import csv
-        import json
-        xml = '''<log><trace><string key="concept:name" value="one"/><event><string key="concept:name" value="A"/><date key="time:timestamp" value="2020-01-01T00:00:00Z"/></event></trace></log>'''
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / 'single.xes.gz'
-            with gzip.open(path, 'wt', encoding='utf-8') as f:
-                f.write(xml)
-            output = Path(d) / 'result'
-            analysis.run(path, output, edge_threshold=1)
-            summary = json.loads((output / 'summary.json').read_text(encoding='utf-8'))
-            self.assertEqual(summary['transitions'], 0)
-            with (output / 'transitions.csv').open(encoding='utf-8-sig', newline='') as f:
-                reader = csv.DictReader(f)
-                self.assertEqual(reader.fieldnames, ['source', 'target', 'count', 'case_count', 'median_hours', 'p95_hours', 'total_hours'])
-                self.assertEqual(list(reader), [])
-            for filename, fields in [
-                ('graph_two_node_cycles.csv', ['activity_a', 'activity_b', 'a_to_b_count', 'b_to_a_count']),
-                ('observed_aba.csv', ['start', 'middle', 'occurrences', 'case_count',
-                                      'occurrences_with_equal_timestamp', 'case_count_with_equal_timestamp'])]:
-                with (output / filename).open(encoding='utf-8-sig', newline='') as f:
-                    reader = csv.DictReader(f)
-                    self.assertEqual(reader.fieldnames, fields)
-                    self.assertEqual(list(reader), [])
 
-    def test_run_writes_complete_artifacts(self):
-        run = getattr(analysis, 'run', None)
-        self.assertTrue(callable(run), 'run not implemented')
-        import json
-        xml = '''<log><trace><string key="concept:name" value="1"/><event><string key="concept:name" value="A"/><date key="time:timestamp" value="2020-01-01T00:00:00Z"/></event><event><string key="concept:name" value="B"/><date key="time:timestamp" value="2020-01-02T00:00:00Z"/></event></trace></log>'''
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d)/'s.gz'
-            with gzip.open(path,'wt',encoding='utf-8') as f: f.write(xml)
-            output = Path(d)/'result'
-            run(path, output, edge_threshold=1)
-            summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
-            self.assertEqual(summary['events'], 2)
-            self.assertTrue((output/'dfg_full.html').exists())
-            self.assertTrue((output/'transitions.csv').exists())
-            self.assertTrue((output/'dfg_filtered.png').exists())
-            self.assertIn('A', (output/'dfg_full.html').read_text(encoding='utf-8'))
-            with self.assertRaises(FileExistsError): run(path, output, edge_threshold=1)
+def read_csv(name):
+    with open(TAB / name, encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
 
-if __name__ == '__main__': unittest.main()
+
+def snapshot():
+    """Содержимое summary.json и всех CSV-результатов."""
+    files = [OUT / "summary.json", OUT / "cases.csv", OUT / "clean_log.csv"]
+    files += [TAB / t for t in TABLES]
+    return {p.relative_to(OUT).as_posix(): p.read_bytes() for p in files}
+
+
+class AnalysisTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.proc = run_analysis()
+        if cls.proc.returncode == 0:
+            cls.S = json.loads((OUT / "summary.json").read_text(encoding="utf-8"))
+            cls.snap = snapshot()
+
+    def setUp(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         "analysis.py завершился с ошибкой:\n" + self.proc.stderr[-3000:])
+
+    # ------------------------------------------------------------ запуск
+    def test_exit_code(self):
+        self.assertEqual(self.proc.returncode, 0)
+        self.assertIn("Graphviz:", self.proc.stdout)
+
+    # ------------------------------------------------------- summary.json
+    def test_summary_keys(self):
+        keys = {"raw_events", "raw_cases", "complete_cases", "incomplete_cases",
+                "complete_events", "activities", "period", "duration_all_days",
+                "duration_stay_days", "variants_all", "variants_stay", "process_tree",
+                "fitness", "precision", "f1", "nonfit_cases", "deviations", "happy_path",
+                "happy_route", "happy_route_cases", "fastest_route", "long_threshold_days",
+                "long_cases", "top_long_all_cases", "self_loop_events", "two_node_cycles",
+                "antibiotics_median_h", "return_er_cases"}
+        self.assertFalse(keys - set(self.S), f"нет ключей: {sorted(keys - set(self.S))}")
+
+    def test_summary_invariants(self):
+        S = self.S
+        self.assertEqual(S["raw_cases"], 1050)
+        self.assertEqual(S["raw_events"], 15214)
+        self.assertEqual(S["complete_cases"] + S["incomplete_cases"], S["raw_cases"])
+        self.assertGreater(S["complete_cases"], 0)
+        self.assertLessEqual(S["complete_events"], S["raw_events"])
+        self.assertEqual(S["activities"], 16)
+        for k in ("fitness", "precision", "f1", "fitness_im0", "precision_im0"):
+            self.assertGreaterEqual(S[k], 0, k)
+            self.assertLessEqual(S[k], 1, k)
+        self.assertGreater(S["long_cases"], 0)
+        self.assertLess(S["long_cases"], S["complete_cases"])
+        self.assertGreater(S["happy_route_cases"], 0)
+        self.assertLessEqual(S["happy_route_cases"], S["complete_cases"])
+        self.assertLessEqual(S["nonfit_cases"], S["complete_cases"])
+        self.assertEqual(S["duration_all_days"]["count"], S["raw_cases"])
+        self.assertEqual(S["duration_stay_days"]["count"], S["complete_cases"])
+        self.assertEqual(sum(S["start_activities"].values()), S["raw_cases"])
+        self.assertEqual(sum(S["end_activities"].values()), S["raw_cases"])
+        self.assertLessEqual(S["variants_all_single"], S["variants_all"])
+        self.assertLessEqual(S["variants_all"], S["raw_cases"])
+        self.assertLessEqual(S["dfg_edges_shown"], S["dfg_edges_total"])
+        self.assertEqual(len(S["top_long_all_cases"]), 5)
+        self.assertTrue(S["happy_route"].startswith("ER Registration"))
+
+    # ----------------------------------------------------------- таблицы
+    def test_tables_exist(self):
+        for t in TABLES:
+            self.assertTrue((TAB / t).is_file(), t)
+            self.assertGreater(len(read_csv(t)), 0, t)
+
+    def test_deviations_table(self):
+        S = self.S
+        rows = {r["rule"]: int(float(r["cases"])) for r in read_csv("deviations.csv")}
+        self.assertEqual(rows, S["deviations"])
+        for rule, n in rows.items():
+            self.assertGreaterEqual(n, 0, rule)
+            self.assertLessEqual(n, S["raw_cases"], rule)
+        self.assertEqual(rows["Начало не с ER Registration"], S["cases_not_start_registration"])
+        self.assertEqual(rows["Нет выписки (Release) – незавершённый экземпляр"],
+                         S["cases_without_release"])
+        self.assertEqual(rows["Не соответствуют модели (token replay)"], S["nonfit_cases"])
+        # незавершённые = не с регистрации ИЛИ без выписки
+        self.assertLessEqual(S["incomplete_cases"],
+                             S["cases_not_start_registration"] + S["cases_without_release"])
+        self.assertGreaterEqual(S["incomplete_cases"],
+                                max(S["cases_not_start_registration"], S["cases_without_release"]))
+
+    def test_dfg_and_cycles_tables(self):
+        S = self.S
+        edges = read_csv("dfg_edges_all.csv")
+        self.assertEqual(len(edges), S["dfg_edges_total"])
+        self.assertEqual(len(edges), S["distinct_transitions_all"])
+        # переходов на 1 меньше, чем событий, в каждом случае (после удаления дубликатов)
+        events = S["raw_events"] - S["duplicates"]
+        self.assertEqual(sum(int(r["count"]) for r in edges), events - S["raw_cases"])
+        loops = read_csv("self_loops.csv")
+        self.assertEqual(sum(int(r["count"]) for r in loops), S["self_loop_events"])
+        self.assertEqual(len(read_csv("two_node_cycles.csv")), S["two_node_cycles"])
+
+    def test_case_level_tables(self):
+        S = self.S
+        with open(OUT / "cases.csv", encoding="utf-8-sig", newline="") as f:
+            cases = list(csv.DictReader(f))
+        self.assertEqual(len(cases), S["complete_cases"])
+        self.assertEqual(sum(r["long"] == "True" for r in cases), S["long_cases"])
+        labs = read_csv("lab_groups.csv")
+        self.assertEqual(sum(int(r["cases"]) for r in labs), S["complete_cases"])
+        routes = read_csv("routes_top10.csv")
+        self.assertEqual(routes[0]["route"], S["happy_route"])
+        self.assertEqual(int(routes[0]["cases"]), S["happy_route_cases"])
+        self.assertLessEqual(sum(float(r["share_%"]) for r in routes), 100.01)
+        for r in read_csv("rework.csv"):
+            self.assertLessEqual(int(r["cases_with_repeat"]), S["raw_cases"])
+        var = read_csv("variants_top10_all.csv")
+        self.assertEqual(sum(int(r["cases"]) for r in var[:1]),
+                         round(S["top_variant_share_all"] / 100 * S["raw_cases"]))
+
+    # ----------------------------------------------------------- рисунки
+    def test_figures(self):
+        for name in CHARTS:
+            p = FIG / name
+            self.assertTrue(p.is_file(), name)
+            self.assertEqual(p.read_bytes()[:8], b"\x89PNG\r\n\x1a\n", name)
+        for name in GRAPHS:
+            gv = FIG / f"{name}.gv"
+            self.assertTrue(gv.is_file(), gv.name)
+            self.assertIn("digraph", gv.read_text(encoding="utf-8"))
+
+    # -------------------------------------------------- воспроизводимость
+    def test_reproducible(self):
+        first_summary, first = self.S, self.snap
+        proc = run_analysis()
+        self.assertEqual(proc.returncode, 0, proc.stderr[-3000:])
+        second_summary = json.loads((OUT / "summary.json").read_text(encoding="utf-8"))
+        diff_keys = sorted(k for k in set(first_summary) | set(second_summary)
+                           if first_summary.get(k) != second_summary.get(k))
+        self.assertEqual(diff_keys, [], f"summary.json различается по ключам: {diff_keys}")
+        second = snapshot()
+        diff_files = sorted(k for k in first if first[k] != second.get(k))
+        self.assertEqual(diff_files, [], f"различаются файлы: {diff_files}")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
