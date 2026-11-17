@@ -1,0 +1,6 @@
+﻿route,cases,median_days,icu,return_er,share_%
+ER Registration → IV Liquid → ER Triage → ER Sepsis Triage → IV Antibiotics → Admission NC → Release A,15,4.286,0.0,0.267,2.03
+ER Registration → ER Triage → ER Sepsis Triage → Admission NC → Release A,72,4.48,0.0,0.361,9.743
+ER Registration → ER Triage → ER Sepsis Triage → IV Antibiotics → Admission NC → IV Liquid → Release A,14,4.501,0.0,0.5,1.894
+ER Registration → ER Triage → ER Sepsis Triage → IV Antibiotics → IV Liquid → Admission NC → Release A,41,4.643,0.0,0.463,5.548
+ER Registration → ER Triage → ER Sepsis Triage → IV Antibiotics → Admission NC → Release A,40,4.888,0.0,0.4,5.413

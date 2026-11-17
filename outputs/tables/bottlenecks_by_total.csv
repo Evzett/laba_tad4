@@ -1,0 +1,9 @@
+﻿from,to,count,cases,median_h,mean_h,p90_h,total_h,share_time_%
+CRP,Leucocytes,1252,531,0.0,13.22,48.0,16546.4,12.21
+Leucocytes,Leucocytes,412,204,24.0,35.95,72.0,14813.25,10.94
+CRP,Release A,309,309,32.0,47.54,99.2,14689.42,10.84
+CRP,CRP,292,194,48.0,48.99,92.92,14304.77,10.56
+Admission NC,Leucocytes,376,339,24.54,32.74,66.28,12309.5,9.09
+Admission NC,CRP,343,315,25.88,34.09,65.18,11691.32,8.63
+Leucocytes,Release A,212,212,30.0,46.21,99.45,9797.14,7.23
+Leucocytes,CRP,1532,614,0.0,6.15,24.0,9424.88,6.96
