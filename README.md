@@ -57,7 +57,7 @@ python -m venv .venv
 | `tables/routes_*.csv`, `fastest_variants.csv` | укрупнённые маршруты и самые быстрые пути |
 | `tables/lab_groups.csv` | длительность в зависимости от числа анализов |
 | `tables/long_*.csv`, `top5_long_cases.csv` | экземпляры с аномально большой длительностью |
-| `figures/dfg_frequency.*`, `dfg_performance.*` | DFG по частоте и по медианному времени (дуги ≥ 25) |
+| `figures/dfg_frequency.*`, `dfg_performance.*` | DFG по частоте и по медианному времени (дуги ≥ 100) |
 | `figures/petri_net.*`, `bpmn.*` | выбранная модель (Inductive Miner – infrequent, порог шума 0,01): сеть Петри и BPMN |
 | `figures/petri_net_abstract.*` | модель после абстракции событий (анализы объединены в Lab) |
 | `figures/model_selection.png`, `tables/model_selection*.csv` | эксперимент по выбору алгоритма и порога шума |

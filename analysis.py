@@ -56,7 +56,7 @@ LABS = ["CRP", "Leucocytes", "LacticAcid"]
 NOISE_GRID = [0.0, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5]
 HEU_GRID = [0.9, 0.99]   # порог зависимости Heuristic Miner
 MIN_FITNESS = 0.95       # модель должна объяснять не менее 95 % поведения журнала
-MIN_EDGE = 25       # порог частоты дуги на рисунке DFG
+MIN_EDGE = 100      # порог частоты дуги на рисунке DFG (только картинка)
 SEED = 42
 np.random.seed(SEED)
 
@@ -112,6 +112,7 @@ S["complete_events"] = int(len(clog))
 S["activities"] = int(log[ACT].nunique())
 S["period"] = [str(log[TS].min().date()), str(log[TS].max().date())]
 log.to_csv(OUT / "clean_log.csv", index=False, encoding="utf-8-sig")
+
 
 # Эпизод госпитализации: от первого события до первой выписки.
 # Return ER (повторное обращение) – отдельный эпизод, его не смешиваем
@@ -596,6 +597,36 @@ a2.set_xlabel("precision")
 a2.set_ylabel("fitness")
 a2.legend(fontsize=8, loc="lower left")
 savefig(fig, "model_selection.png")
+
+# ================================================= 12а. Описание данных
+# Атрибуты, частоты действий, фрагмент журнала.
+ATTR_INFO = {
+    CASE: "идентификатор экземпляра (пациента)",
+    ACT: "действие (активность)",
+    TS: "время события",
+    "org:group": "группа исполнителей (отделение)",
+}
+attrs = pd.DataFrame([{"attribute": k, "meaning": v,
+                       "unique": int(log[k].nunique()), "example": str(log[k].iloc[0])}
+                      for k, v in ATTR_INFO.items()])
+save_table(attrs, "data_attributes.csv")
+acts = log[ACT].value_counts().rename_axis("activity").reset_index(name="events")
+acts["cases"] = acts["activity"].map(log.groupby(ACT)[CASE].nunique())
+save_table(acts, "data_activities.csv")
+sample_case = log[CASE].iloc[0]
+sample = log[log[CASE] == sample_case].head(10).copy()
+sample[TS] = sample[TS].dt.strftime("%Y-%m-%d %H:%M")
+save_table(sample, "data_sample.csv")
+S["data_sample_case"] = str(sample_case)
+S["org_groups"] = int(log["org:group"].nunique())
+print("=== Данные: Sepsis Cases – Event Log ===")
+print(f"Событий: {S['raw_events']}, экземпляров: {S['raw_cases']}, атрибутов: {S['raw_columns']}, "
+      f"действий: {S['activities']}, период: {S['period'][0]} – {S['period'][1]}")
+print(attrs.to_string(index=False))
+print(acts.to_string(index=False))
+print(f"Фрагмент журнала (случай {sample_case}):")
+print(sample.to_string(index=False))
+S["dfg_min_edge"] = MIN_EDGE
 
 # ================================================= 13. Сводка
 cases.reset_index().to_csv(OUT / "cases.csv", index=False, encoding="utf-8-sig")

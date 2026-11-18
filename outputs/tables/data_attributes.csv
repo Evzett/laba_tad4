@@ -1,0 +1,5 @@
+﻿attribute,meaning,unique,example
+case:concept:name,идентификатор экземпляра (пациента),1050,A
+concept:name,действие (активность),16,ER Registration
+time:timestamp,время события,9469,2014-10-22 09:15:41+00:00
+org:group,группа исполнителей (отделение),26,A

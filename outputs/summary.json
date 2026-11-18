@@ -72,7 +72,7 @@
   "top_variant_share_all": 3.33,
   "distinct_transitions_all": 115,
   "dfg_edges_total": 115,
-  "dfg_edges_shown": 53,
+  "dfg_edges_shown": 29,
   "noise_selected": 0.01,
   "selection_rule": "sound; fitness >= 0.95; max F1; при равенстве – меньшая модель, затем меньший порог",
   "model_selection": [
@@ -359,5 +359,8 @@
       "days": 387.0,
       "last": "Return ER"
     }
-  ]
+  ],
+  "data_sample_case": "A",
+  "org_groups": 26,
+  "dfg_min_edge": 100
 }
