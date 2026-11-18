@@ -142,6 +142,7 @@ details .a{padding:8px 14px 10px}
     <li><a href="#s11">11. Контрольные вопросы</a></li>
     <li><a href="#s12">12. Как запустить</a></li>
     <li><a href="#arch">13. Архитектура и разбор кода</a></li>
+    <li><a href="#optimize">13а. Оптимизация и запуск моделей</a></li>
     <li><a href="#changelog">14. Журнал изменений</a></li>
   </ol>
   <div class="tools">
@@ -161,7 +162,7 @@ details .a{padding:8px 14px 10px}
       <li><a href="#s3">Данные</a></li><li><a href="#s4">Предобработка</a></li><li><a href="#s5">Графы</a></li>
       <li><a href="#s6">Проверка соответствия</a></li><li><a href="#s7">Анализ</a></li><li><a href="#s8">Оптимизация</a></li>
       <li><a href="#s9">Сравнение с одногруппником</a></li><li><a href="#s10">Теория</a></li>
-      <li><a href="#s11">Контрольные вопросы</a></li><li><a href="#s12">Как запустить</a></li><li><a href="#arch">Архитектура и код</a></li><li><a href="#changelog">Журнал изменений</a></li>
+      <li><a href="#s11">Контрольные вопросы</a></li><li><a href="#s12">Как запустить</a></li><li><a href="#arch">Архитектура и код</a></li><li><a href="#optimize">Оптимизация и запуск</a></li><li><a href="#changelog">Журнал изменений</a></li>
     </ol>
   </details>
 </header>
@@ -2316,6 +2317,84 @@ dot -V
 <details><summary><span class="tag">код</span>Как ссылки «на рисунке N» в тексте согласованы с номерами рисунков?</summary><div class="a">Глобальные счётчики <code>fig_no</code> и <code>tab_no</code> увеличиваются в <code>figure()</code> и <code>table()</code>. Текст со ссылкой пишется <i>до</i> объекта, поэтому номер берётся из <code>next_fig()</code>/<code>next_tab()</code> = счётчик + 1. Если вставить рисунок в середину, все номера и ссылки пересчитаются автоматически.</div></details>
 <details><summary><span class="tag">код</span>Почему тест воспроизводимости не сравнивает картинки?</summary><div class="a">Снимок включает только <code>summary.json</code>, <code>cases.csv</code>, <code>clean_log.csv</code> и 16 таблиц. Визуализатор DFG pm4py называет узлы через <code>str(hash(act))</code>, а хэш строк в Python рандомизирован между процессами. Сеть Петри использует <code>id()</code> объектов. Текст <code>.gv</code> поэтому может отличаться при одинаковом графе. <code>test_figures</code> проверяет только наличие и формат файлов.</div></details>
 </section>
+
+<section id="optimize">
+<h2><span class="no">13а</span>Что мы оптимизировали и как запускать модели</h2>
+
+<h3 id="opt-what">1. Что оптимизировали</h3>
+<div class="tw"><table><thead><tr><th>Что</th><th>Было</th><th>Как оптимизировали</th><th>Стало</th></tr></thead><tbody>
+<tr><td>Алгоритм построения модели</td><td>Inductive Miner выбран без сравнения</td><td>Перебор кандидатов: Alpha, Heuristic Miner (0,9; 0,99), Inductive Miner. Отсев некорректных (unsound) сетей</td><td>Alpha и Heuristic Miner отсеяны (сети некорректны), выбран Inductive Miner</td></tr>
+<tr><td>Порог шума Inductive Miner</td><td>0,2 «по умолчанию»</td><td>Сетка <code>NOISE_GRID</code> = 0…0,5; правило: sound → fitness ≥ 0,95 → max F1 → меньшая модель → меньший порог</td><td>0,01 (0,01–0,1 – одна модель): F1 0,5407 против 0,5381; не подходят 15 эпизодов вместо 124</td></tr>
+<tr><td>Precision модели</td><td>0,371, причина не объяснена</td><td>Проверили, что порог её не меняет; абстракция событий: CRP, Leucocytes, LacticAcid → «Lab»</td><td>Причина найдена (свободный порядок анализов); с «Lab» precision 0,554, F1 0,712</td></tr>
+<tr><td>Длительности</td><td>Включали время дома до Return ER (до 422 сут)</td><td>Эпизод госпитализации обрезан по первой выписке</td><td>Медиана 5,49 сут, максимум 114 сут; Return ER – отдельный цикл</td></tr>
+<tr><td>Читаемость DFG</td><td>Порог 400 (7 узлов «оторваны»), затем 25 (53 дуги, тесно)</td><td><code>MIN_EDGE</code> влияет только на рисунок</td><td>100: 29 дуг из 115, расчёты по всем 115</td></tr>
+<tr><td>Порог длительных случаев</td><td>P95 / 2σ</td><td>Правило Тьюки Q3 + 1,5·IQR – устойчиво к скошенному распределению</td><td>16,79 сут, 55 эпизодов (7,4 %), 25,7 % времени</td></tr>
+<tr><td>Узкие места</td><td>Среднее время</td><td>Медиана + суммарное время на дуге</td><td>Лабораторный цикл – 44,7 % времени эпизодов</td></tr>
+<tr><td>Сам процесс (предложения)</td><td>–</td><td>6 мер, у каждой KPI</td><td>Антибиотик ≤ 1 ч (сейчас 40,7 %), единая лабораторная панель, планирование выписки и др. (раздел 8)</td></tr>
+</tbody></table></div>
+<div class="note"><b>Важно:</b> в Process Mining модель не «обучается» как нейросеть. Алгоритм <i>обнаружения</i> (discovery) один раз строит модель по журналу, без весов и эпох. «Подбирается» только параметр (порог шума) – по качеству на том же журнале (fitness, precision, F1). Поэтому слово «обучение» здесь условно; правильно – «построение (извлечение) модели».</div>
+
+<h3 id="opt-run">2. Как запустить всё целиком</h3>
+<pre><code>python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+# Graphviz (https://graphviz.org/download/) – добавить bin в PATH, чтобы получить PNG графов
+.venv\Scripts\python analysis.py        # анализ, выбор модели, сети, таблицы -> outputs/
+.venv\Scripts\python create_report.py   # отчёт .docx из outputs/
+.venv\Scripts\python -m unittest discover -s tests -v   # 10 тестов</code></pre>
+<p><code>analysis.py</code> выполняет всё по порядку: загрузка → предобработка → описание данных → DFG → <b>перебор моделей и выбор</b> → сеть Петри и BPMN → проверка соответствия → анализ. Время работы около 1–1,5 мин (большая часть – перебор моделей).</p>
+
+<h3 id="opt-steps">3. По шагам вручную (для показа у доски / в консоли Python)</h3>
+<p>Все шаги – функции pm4py. Можно выполнить в интерактивной консоли из папки проекта.</p>
+<pre><code>import pm4py
+log = pm4py.read_xes("data/Sepsis Cases - Event Log.xes.gz")      # журнал -> DataFrame
+
+# 1) Граф непосредственного следования (DFG)
+dfg, start, end = pm4py.discover_dfg(log)                          # {(A, B): частота}
+pm4py.view_dfg(dfg, start, end)                                    # нужен Graphviz
+perf, s2, e2 = pm4py.discover_performance_dfg(log)                 # время на дугах
+
+# 2) Построение модели («обучение»): Inductive Miner
+tree = pm4py.discover_process_tree_inductive(log, noise_threshold=0.01)   # 0 = IM, &gt;0 = IMf
+net, im, fm = pm4py.convert_to_petri_net(tree)                     # сеть Петри + нач./кон. разметка
+pm4py.view_petri_net(net, im, fm)
+pm4py.save_vis_petri_net(net, im, fm, "petri.png")
+bpmn = pm4py.convert_to_bpmn(tree)                                 # BPMN из того же дерева
+pm4py.view_bpmn(bpmn)
+
+# Другие алгоритмы для сравнения
+net_a, im_a, fm_a = pm4py.discover_petri_net_alpha(log)
+net_h, im_h, fm_h = pm4py.discover_petri_net_heuristics(log, dependency_threshold=0.9)
+
+# 3) Проверка соответствия (token replay) и корректности
+fit  = pm4py.fitness_token_based_replay(log, net, im, fm)          # fit["log_fitness"]
+prec = pm4py.precision_token_based_replay(log, net, im, fm)
+f1   = 2 * fit["log_fitness"] * prec / (fit["log_fitness"] + prec)
+diag = pm4py.conformance_diagnostics_token_based_replay(
+           log, net, im, fm, return_diagnostics_dataframe=True)    # is_fit по каждой трассе
+sound = pm4py.check_soundness(net_a, im_a, fm_a)[0]                # для Alpha/Heuristic (быстро)</code></pre>
+<div class="warn">Без Graphviz функции <code>view_*</code> и <code>save_vis_*</code> не работают. В <code>analysis.py</code> это обработано: при отсутствии <code>dot</code> сохраняются исходники графов <code>*.gv</code>, их можно открыть в любом просмотрщике Graphviz. Для сетей Inductive Miner <code>check_soundness</code> не вызываем: Woflan не укладывается в 5 минут из-за параллельного блока, а корректность IM гарантирована построением.</div>
+
+<h3 id="opt-code">4. Где это в коде</h3>
+<div class="tw"><table><thead><tr><th>Что</th><th>analysis.py</th><th>Результат</th></tr></thead><tbody>
+<tr><td>Параметры перебора</td><td>стр. 56–59: <code>NOISE_GRID</code>, <code>HEU_GRID</code>, <code>MIN_FITNESS</code>, <code>MIN_EDGE</code></td><td>–</td></tr>
+<tr><td>Оценка одной модели</td><td>функция <code>evaluate()</code></td><td>fitness, precision, F1, размер сети</td></tr>
+<tr><td>Перебор и выбор</td><td><code>candidates()</code> стр. 253, вызов стр. 275</td><td><code>tables/model_selection.csv</code>, <code>figures/model_selection.png</code>, <code>noise_selected</code> в summary.json</td></tr>
+<tr><td>Абстракция «Lab»</td><td>стр. 290–293</td><td><code>tables/model_selection_abstract.csv</code>, <code>figures/petri_net_abstract.*</code></td></tr>
+<tr><td>Итоговая модель</td><td>стр. 309: <code>tree = trees[NOISE]</code> → сеть Петри, BPMN</td><td><code>figures/petri_net.*</code>, <code>figures/bpmn.*</code></td></tr>
+<tr><td>Проверка соответствия</td><td>после построения модели</td><td><code>fitness</code>, <code>precision</code>, <code>nonfit_cases</code>; колонка <code>fit</code> в <code>cases.csv</code></td></tr>
+</tbody></table></div>
+
+<h3 id="opt-change">5. Как поменять и перезапустить</h3>
+<ul>
+<li>Другой набор порогов – поменять <code>NOISE_GRID</code> (стр. 56) и запустить <code>python analysis.py</code>; модель выберется заново по тому же правилу.</li>
+<li>Жёстко задать порог – оставить в <code>NOISE_GRID</code> одно значение, например <code>[0.2]</code>.</li>
+<li>Строже требование к fitness – изменить <code>MIN_FITNESS</code> (стр. 58).</li>
+<li>Больше/меньше стрелок на рисунке DFG – <code>MIN_EDGE</code> (стр. 59); расчёты не меняются.</li>
+<li>После любого изменения: <code>python analysis.py</code> → <code>python create_report.py</code> → тесты.</li>
+</ul>
+<p class="good"><b>Коротко для преподавателя:</b> «Модель строится алгоритмом Inductive Miner функцией <code>discover_process_tree_inductive</code>, порог шума подбирается перебором по F1 среди корректных моделей с fitness ≥ 0,95. Из дерева процесса получаем сеть Петри (<code>convert_to_petri_net</code>) и BPMN (<code>convert_to_bpmn</code>), качество проверяем воспроизведением маркеров. Всё запускается одной командой <code>python analysis.py</code>».</p>
+</section>
+
 
 <section id="changelog">
 <style>
