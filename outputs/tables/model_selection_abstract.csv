@@ -1,0 +1,10 @@
+﻿model,algorithm,param,sound,fitness,fitting_traces_%,precision,f1,places,transitions,silent,arcs,size,selected
+IM 0.0,Inductive Miner,0.0,True,1.0,100.0,0.3928,0.564,24,33,20,74,131,False
+IMf 0.01,Inductive Miner,0.01,True,0.9979,98.65,0.5537,0.7122,18,24,11,56,98,True
+IMf 0.02,Inductive Miner,0.02,True,0.9979,98.65,0.5537,0.7122,18,24,11,56,98,False
+IMf 0.05,Inductive Miner,0.05,True,0.9979,98.65,0.5537,0.7122,18,24,11,56,98,False
+IMf 0.1,Inductive Miner,0.1,True,0.9979,98.65,0.5537,0.7122,18,24,11,56,98,False
+IMf 0.15,Inductive Miner,0.15,True,0.9782,86.06,0.5537,0.7072,18,23,10,54,95,False
+IMf 0.2,Inductive Miner,0.2,True,0.9782,86.06,0.5537,0.7072,18,23,10,54,95,False
+IMf 0.3,Inductive Miner,0.3,True,0.9663,78.76,0.5537,0.704,18,22,9,52,92,False
+IMf 0.5,Inductive Miner,0.5,True,0.9663,78.76,0.5537,0.704,18,22,9,52,92,False
