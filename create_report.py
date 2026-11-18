@@ -222,8 +222,6 @@ def table(caption, headers, data, widths, size=12, align_first=WD_ALIGN_PARAGRAP
 
 
 # =================================================================== текст
-struct_heading("Содержание")
-toc()
 page_break()
 
 heading("1 Цель и задачи работы")
@@ -241,7 +239,7 @@ bullets([
 
 heading("2 Исходные данные и инструменты")
 para("Для анализа выбран открытый журнал событий Sepsis Cases – Event Log из репозитория "
-     "4TU.ResearchData [1]. Журнал выгружен из ERP-системы нидерландской больницы и описывает "
+     "4TU.ResearchData. Журнал выгружен из ERP-системы нидерландской больницы и описывает "
      "путь пациентов с подозрением на сепсис: от регистрации в приёмном отделении через "
      "лабораторные анализы, лечение и госпитализацию до выписки и, возможно, повторного "
      f"обращения. Экземпляр процесса (case) – один пациент. Журнал содержит {integer(S['raw_events'])} "
@@ -263,11 +261,10 @@ ACTS = [
     ("Return ER", "Повторное обращение в приёмное отделение после выписки"),
 ]
 table("Действия бизнес-процесса", ["Действие", "Содержание"], ACTS, [5.5, 11.0])
-para("Программа написана на языке Python 3. Использованы библиотеки: PM4Py [2] – чтение XES, "
+para("Программа написана на языке Python 3. Использованы библиотеки: PM4Py – чтение XES, "
      "построение графа непосредственного следования (DFG), алгоритм Inductive Miner, сети Петри, "
      "BPMN и проверка соответствия методом воспроизведения маркеров; pandas – предварительная "
-     "обработка и расчёт показателей; matplotlib – диаграммы; Graphviz – визуализация графов. "
-     "Текст программы приведён в приложении А.")
+     "обработка и расчёт показателей; matplotlib – диаграммы; Graphviz – визуализация графов.")
 
 heading("3 Предварительная обработка данных")
 para("Предварительная обработка включала следующие шаги:")
@@ -546,33 +543,6 @@ para("Узкие места процесса – ожидание повторн
      "4 раза чаще реанимация. Предложены меры по оптимизации: протокол ранней "
      "антибиотикотерапии, стандартизация лабораторного блока, планирование выписки и "
      "наблюдение после неё. Цель работы достигнута.")
-
-struct_heading("Список использованных источников")
-SRC = [
-    "Mannhardt, F. Sepsis Cases – Event Log // 4TU.ResearchData : репозиторий. – 2016. – "
-    "DOI 10.4121/uuid:915d2bfb-7e84-49ad-a286-dc35f063a460. – URL: "
-    "https://data.4tu.nl/articles/dataset/Sepsis_Cases_-_Event_Log/12707639 "
-    "(дата обращения: 10.11.2026).",
-    "PM4Py – Process Mining for Python : документация // Fraunhofer FIT : официальный сайт. – "
-    "URL: https://processintelligence.solutions/pm4py (дата обращения: 10.11.2026).",
-    "Ван дер Аалст, В. Process Mining: Data Science in Action / В. ван дер Аалст. – 2-е изд. – "
-    "Berlin : Springer, 2016. – 467 с.",
-    "Михалев, А. С. Лекция 7. Process mining : конспект лекций по дисциплине «Технологии "
-    "анализа данных» / А. С. Михалев. – Красноярск : СФУ, 2026. – 52 с.",
-]
-for i, s in enumerate(SRC, 1):
-    para(f"{i} {s}")
-
-# ------------------------------------------------- приложение А: листинг
-struct_heading("Приложение А")
-p = para("Листинг программы analysis.py", align=WD_ALIGN_PARAGRAPH.CENTER, indent=0, after=12)
-p.runs[0].bold = True
-for line in (ROOT / "analysis.py").read_text(encoding="utf-8").splitlines():
-    cp = fmt(doc.add_paragraph(), align=WD_ALIGN_PARAGRAPH.LEFT, indent=0, spacing=1.0)
-    r = cp.add_run(line if line else " ")
-    r.font.name = "Courier New"
-    r._element.rPr.rFonts.set(qn("w:eastAsia"), "Courier New")
-    r.font.size = Pt(10)
 
 doc.core_properties.title = "Отчёт о практической работе № 4 «Процессная аналитика»"
 doc.core_properties.author = ""
