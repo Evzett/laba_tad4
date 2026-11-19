@@ -167,6 +167,23 @@ class AnalysisTest(unittest.TestCase):
             self.assertIn("digraph", gv.read_text(encoding="utf-8"))
 
     # -------------------------------------------------- воспроизводимость
+    def test_model_selection(self):
+        """Выбранная модель удовлетворяет правилу: sound, fitness >= 0,95, max F1."""
+        rows = read_csv("model_selection.csv")
+        sel = [r for r in rows if r["selected"] == "True"]
+        self.assertEqual(len(sel), 1)
+        best = sel[0]
+        self.assertEqual(best["sound"], "True")
+        self.assertGreaterEqual(float(best["fitness"]), 0.95)
+        ok = [r for r in rows if r["sound"] == "True" and float(r["fitness"]) >= 0.95]
+        self.assertEqual(float(best["f1"]), max(float(r["f1"]) for r in ok))
+        self.assertEqual(float(best["param"]), self.S["noise_selected"])
+        self.assertEqual(float(best["fitness"]), self.S["fitness"])
+        self.assertEqual({r["algorithm"] for r in rows},
+                         {"Alpha", "Heuristic Miner", "Inductive Miner"})
+        self.assertGreater(self.S["abstract_precision"], self.S["precision"])
+        self.assertTrue((OUT / "figures" / "model_selection.png").exists())
+
     def test_reproducible(self):
         first_summary, first = self.S, self.snap
         proc = run_analysis()

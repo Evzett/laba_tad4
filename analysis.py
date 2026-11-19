@@ -49,8 +49,14 @@ CASE, ACT, TS = "case:concept:name", "concept:name", "time:timestamp"
 RELEASES = ["Release A", "Release B", "Release C", "Release D", "Release E"]
 ADMISSIONS = ["Admission NC", "Admission IC"]
 LABS = ["CRP", "Leucocytes", "LacticAcid"]
-NOISE = 0.2          # порог шума Inductive Miner (IMf)
-MIN_EDGE = 25        # порог частоты дуги на рисунке DFG
+# Порог шума Inductive Miner не задаётся вручную: он выбирается
+# экспериментом (раздел 6) из сетки NOISE_GRID по правилу SELECT_RULE.
+# noise_threshold = 0 – базовый IM, noise_threshold > 0 – вариант IMf
+# (Inductive Miner – infrequent), который отбрасывает редкие связи.
+NOISE_GRID = [0.0, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5]
+HEU_GRID = [0.9, 0.99]   # порог зависимости Heuristic Miner
+MIN_FITNESS = 0.95       # модель должна объяснять не менее 95 % поведения журнала
+MIN_EDGE = 100      # порог частоты дуги на рисунке DFG (только картинка)
 SEED = 42
 np.random.seed(SEED)
 
@@ -106,6 +112,7 @@ S["complete_events"] = int(len(clog))
 S["activities"] = int(log[ACT].nunique())
 S["period"] = [str(log[TS].min().date()), str(log[TS].max().date())]
 log.to_csv(OUT / "clean_log.csv", index=False, encoding="utf-8-sig")
+
 
 # Эпизод госпитализации: от первого события до первой выписки.
 # Return ER (повторное обращение) – отдельный эпизод, его не смешиваем
@@ -219,10 +226,87 @@ perf_f = {k: v for k, v in perf.items() if k in dfg_f}
 save_gviz(dfg_vis.apply(perf_f, activities_count=act_count, variant=dfg_vis.Variants.PERFORMANCE,
                         parameters={**params, "aggregation_measure": "median"}), "dfg_performance")
 
-# Модель процесса: Inductive Miner (infrequent) по полным экземплярам
-# (эпизоды госпитализации); дерево процесса строится один раз и
-# преобразуется в сеть Петри и BPMN, затем проверка соответствия эпизодов.
-tree = pm4py.discover_process_tree_inductive(stay, noise_threshold=NOISE)
+# ---------------- 6.1 Выбор алгоритма и порога (эксперимент)
+# Кандидаты: Alpha, Heuristic Miner (порог зависимости из HEU_GRID),
+# Inductive Miner с порогом шума из NOISE_GRID. Все строятся по эпизодам
+# госпитализации и оцениваются воспроизведением маркеров (token replay).
+# Правило выбора:
+#   1) сеть корректна (sound): без тупиков и «лишних» маркеров – иначе
+#      проверка соответствия и перевод в BPMN некорректны;
+#   2) fitness >= MIN_FITNESS;
+#   3) максимальный F1 = 2·fitness·precision / (fitness + precision);
+#   4) при равном F1 – меньшая модель (позиции + переходы + дуги),
+#      затем меньший порог (отбрасываем меньше данных).
+# Корректность IM гарантирована построением (дерево процесса всегда даёт
+# sound WF-сеть), для Alpha и Heuristic Miner она проверяется (Woflan).
+def evaluate(name, algo, param, df, net, im, fm, sound):
+    f = pm4py.fitness_token_based_replay(df, net, im, fm)
+    p = pm4py.precision_token_based_replay(df, net, im, fm)
+    fit_ = f["log_fitness"]
+    return {"model": name, "algorithm": algo, "param": param, "sound": bool(sound),
+            "fitness": round(fit_, 4), "fitting_traces_%": round(f["percentage_of_fitting_traces"], 2),
+            "precision": round(p, 4), "f1": round(2 * fit_ * p / (fit_ + p), 4) if fit_ + p else 0.0,
+            "places": len(net.places), "transitions": len(net.transitions),
+            "silent": sum(t.label is None for t in net.transitions), "arcs": len(net.arcs)}
+
+
+def candidates(df, with_others=True):
+    res, trees = [], {}
+    if with_others:
+        n_, i_, f_ = pm4py.discover_petri_net_alpha(df)
+        res.append(evaluate("Alpha", "Alpha", None, df, n_, i_, f_, pm4py.check_soundness(n_, i_, f_)[0]))
+        for th in HEU_GRID:
+            n_, i_, f_ = pm4py.discover_petri_net_heuristics(df, dependency_threshold=th)
+            res.append(evaluate(f"Heuristic {th}", "Heuristic Miner", th, df, n_, i_, f_,
+                                pm4py.check_soundness(n_, i_, f_)[0]))
+    for nt in NOISE_GRID:
+        t_ = pm4py.discover_process_tree_inductive(df, noise_threshold=nt)
+        n_, i_, f_ = pm4py.convert_to_petri_net(t_)
+        res.append(evaluate(f"IM{'f' if nt else ''} {nt}", "Inductive Miner", nt, df, n_, i_, f_, True))
+        trees[nt] = t_
+    tab = pd.DataFrame(res)
+    tab["size"] = tab["places"] + tab["transitions"] + tab["arcs"]
+    ok = tab[tab["sound"] & (tab["fitness"] >= MIN_FITNESS)]
+    best = ok.sort_values(["f1", "size", "param"], ascending=[False, True, True]).iloc[0]
+    tab["selected"] = tab["model"] == best["model"]
+    return tab, best, trees
+
+
+sel_tab, best, trees = candidates(stay)
+save_table(sel_tab, "model_selection.csv")
+NOISE = float(best["param"])
+S["noise_selected"] = NOISE
+S["selection_rule"] = (f"sound; fitness >= {MIN_FITNESS}; max F1; "
+                       "при равенстве – меньшая модель, затем меньший порог")
+S["model_selection"] = sel_tab.drop(columns=["selected"]).to_dict("records")
+imf = sel_tab[sel_tab["algorithm"] == "Inductive Miner"]
+S["precision_range_imf"] = [float(imf.loc[imf.param > 0, "precision"].min()),
+                            float(imf.loc[imf.param > 0, "precision"].max())]
+
+# Причина низкой precision – структура: параллельный блок из 7 ветвей с
+# повторами допускает огромное число перестановок. Проверка: абстракция
+# событий – три анализа заменяются действием «Lab», подряд идущие «Lab»
+# объединяются; тот же отбор по тем же правилам.
+abs_log = stay.copy()
+abs_log[ACT] = abs_log[ACT].where(~abs_log[ACT].isin(LABS), "Lab")
+prev_act = abs_log.groupby(CASE)[ACT].shift()
+abs_log = abs_log[~((abs_log[ACT] == "Lab") & (prev_act == "Lab"))].reset_index(drop=True)
+abs_tab, abs_best, abs_trees = candidates(abs_log, with_others=False)
+save_table(abs_tab, "model_selection_abstract.csv")
+S["abstract_events"] = int(len(abs_log))
+S["abstract_noise"] = float(abs_best["param"])
+S["abstract_fitness"] = float(abs_best["fitness"])
+S["abstract_precision"] = float(abs_best["precision"])
+S["abstract_f1"] = float(abs_best["f1"])
+S["abstract_tree"] = str(abs_trees[S["abstract_noise"]])
+a_net, a_im, a_fm = pm4py.convert_to_petri_net(abs_trees[S["abstract_noise"]])
+save_gviz(pn_vis.apply(a_net, a_im, a_fm, parameters={"format": "png", "bgcolor": "white",
+                                                     "set_rankdir": "TB"}), "petri_net_abstract")
+
+# ---------------- 6.2 Итоговая модель: выбранный порог
+# Дерево процесса строится один раз и преобразуется в сеть Петри и BPMN,
+# затем проверка соответствия эпизодов.
+tree = trees[NOISE]
 net, im, fm = pm4py.convert_to_petri_net(tree)
 bpmn = pm4py.convert_to_bpmn(tree)
 save_gviz(pn_vis.apply(net, im, fm, parameters={"format": "png", "bgcolor": "white",
@@ -233,23 +317,28 @@ S["petri_places"] = len(net.places)
 S["petri_transitions"] = len(net.transitions)
 S["petri_silent"] = sum(t.label is None for t in net.transitions)
 
-fit = pm4py.fitness_token_based_replay(stay, net, im, fm)
-prec = pm4py.precision_token_based_replay(stay, net, im, fm)
-S["fitness"] = round(fit["log_fitness"], 4)
-S["fitting_traces_%"] = round(fit["percentage_of_fitting_traces"], 2)
-S["precision"] = round(prec, 4)
-S["f1"] = round(2 * S["fitness"] * S["precision"] / (S["fitness"] + S["precision"]), 4)
-# для сравнения: модель без фильтрации шума
-net0, im0, fm0 = pm4py.discover_petri_net_inductive(stay, noise_threshold=0.0)
-S["fitness_im0"] = round(pm4py.fitness_token_based_replay(stay, net0, im0, fm0)["log_fitness"], 4)
-S["precision_im0"] = round(pm4py.precision_token_based_replay(stay, net0, im0, fm0), 4)
+S["fitness"] = float(best["fitness"])
+S["fitting_traces_%"] = float(best["fitting_traces_%"])
+S["precision"] = float(best["precision"])
+S["f1"] = float(best["f1"])
+# для сравнения: модель без фильтрации шума (базовый IM) и прежний порог 0,2
+im0 = sel_tab[sel_tab["model"] == "IM 0.0"].iloc[0]
+S["fitness_im0"], S["precision_im0"], S["f1_im0"] = float(im0.fitness), float(im0.precision), float(im0.f1)
+im02 = sel_tab[sel_tab["model"] == "IMf 0.2"].iloc[0]
+S["fitness_im02"], S["precision_im02"], S["f1_im02"] = float(im02.fitness), float(im02.precision), float(im02.f1)
 diag = pm4py.conformance_diagnostics_token_based_replay(stay, net, im, fm,
                                                         return_diagnostics_dataframe=True)
 nonfit = set(diag.loc[~diag["is_fit"], "case_id"])
 cases["fit"] = ~cases.index.isin(nonfit)
 S["nonfit_cases"] = len(nonfit)
-S["nonfit_median_days"] = round(float(cases.loc[~cases.fit, "days"].median()), 2)
-S["fit_median_days"] = round(float(cases.loc[cases.fit, "days"].median()), 2)
+
+
+def med(x):
+    return round(float(x.median()), 2) if len(x) else None
+
+
+S["nonfit_median_days"] = med(cases.loc[~cases.fit, "days"])
+S["fit_median_days"] = med(cases.loc[cases.fit, "days"])
 
 # =============================================== 7. Узкие места
 b = edges[edges["count"] >= 30].copy()
@@ -486,6 +575,58 @@ ax.boxplot(data, tick_labels=[f"{k}\n(n = {n})" for k, n in zip(lab_tab.index, l
 ax.set_xlabel("Число лабораторных анализов в эпизоде (CRP, Leucocytes, LacticAcid)")
 ax.set_ylabel("Длительность, сут")
 savefig(fig, "labs_vs_duration.png")
+
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 4.0))
+g_ = imf.sort_values("param")
+for col, lab, st in (("fitness", "fitness", "o-"), ("precision", "precision", "s-"), ("f1", "F1", "^-")):
+    a1.plot(g_["param"], g_[col], st, label=lab)
+a1.axvline(NOISE, color="red", ls="--", lw=1, label=f"выбран порог {NOISE:g}")
+a1.set_xlabel("Порог шума Inductive Miner")
+a1.set_ylabel("Значение метрики")
+a1.set_ylim(0, 1.05)
+a1.legend(fontsize=9)
+marks = {"Alpha": ("x", "#888888"), "Heuristic Miner": ("D", "#c8507a"), "Inductive Miner": ("o", "#4a7ab5")}
+for algo, (mk, colr) in marks.items():
+    part = sel_tab[sel_tab["algorithm"] == algo]
+    a2.scatter(part["precision"], part["fitness"], marker=mk, color=colr, s=40,
+               label=algo + ("" if part["sound"].all() else " (unsound)"))
+a2.scatter([best["precision"]], [best["fitness"]], s=160, facecolors="none", edgecolors="red",
+           label="выбранная модель")
+a2.axhline(MIN_FITNESS, color="grey", ls=":", lw=1)
+a2.set_xlabel("precision")
+a2.set_ylabel("fitness")
+a2.legend(fontsize=8, loc="lower left")
+savefig(fig, "model_selection.png")
+
+# ================================================= 12а. Описание данных
+# Атрибуты, частоты действий, фрагмент журнала.
+ATTR_INFO = {
+    CASE: "идентификатор экземпляра (пациента)",
+    ACT: "действие (активность)",
+    TS: "время события",
+    "org:group": "группа исполнителей (отделение)",
+}
+attrs = pd.DataFrame([{"attribute": k, "meaning": v,
+                       "unique": int(log[k].nunique()), "example": str(log[k].iloc[0])}
+                      for k, v in ATTR_INFO.items()])
+save_table(attrs, "data_attributes.csv")
+acts = log[ACT].value_counts().rename_axis("activity").reset_index(name="events")
+acts["cases"] = acts["activity"].map(log.groupby(ACT)[CASE].nunique())
+save_table(acts, "data_activities.csv")
+sample_case = log[CASE].iloc[0]
+sample = log[log[CASE] == sample_case].head(10).copy()
+sample[TS] = sample[TS].dt.strftime("%Y-%m-%d %H:%M")
+save_table(sample, "data_sample.csv")
+S["data_sample_case"] = str(sample_case)
+S["org_groups"] = int(log["org:group"].nunique())
+print("=== Данные: Sepsis Cases – Event Log ===")
+print(f"Событий: {S['raw_events']}, экземпляров: {S['raw_cases']}, атрибутов: {S['raw_columns']}, "
+      f"действий: {S['activities']}, период: {S['period'][0]} – {S['period'][1]}")
+print(attrs.to_string(index=False))
+print(acts.to_string(index=False))
+print(f"Фрагмент журнала (случай {sample_case}):")
+print(sample.to_string(index=False))
+S["dfg_min_edge"] = MIN_EDGE
 
 # ================================================= 13. Сводка
 cases.reset_index().to_csv(OUT / "cases.csv", index=False, encoding="utf-8-sig")

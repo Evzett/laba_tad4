@@ -1,0 +1,17 @@
+﻿activity,events,cases
+Leucocytes,3379,1012
+CRP,3260,1007
+LacticAcid,1465,860
+Admission NC,1182,800
+ER Triage,1053,1050
+ER Registration,1050,1050
+ER Sepsis Triage,1049,1049
+IV Antibiotics,823,823
+IV Liquid,753,753
+Release A,671,671
+Return ER,294,294
+Admission IC,117,110
+Release B,56,56
+Release C,25,25
+Release D,24,24
+Release E,6,6
